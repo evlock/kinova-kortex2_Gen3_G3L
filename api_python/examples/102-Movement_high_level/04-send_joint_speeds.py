@@ -17,17 +17,23 @@ import os
 import time
 import threading
 
+from kortex_api.autogen.client_stubs.ControlConfigClientRpc import RouterClient
+from kortex_api.TCPTransport import TCPTransport
 from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 from kortex_api.autogen.client_stubs.DeviceManagerClientRpc import DeviceManagerClient
 from kortex_api.autogen.client_stubs.DeviceConfigClientRpc import DeviceConfigClient
 
-from kortex_api.autogen.messages import Session_pb2, Base_pb2, Common_pb2
+from kortex_api.autogen.messages import Session_pb2, Base_pb2, Common_pb2, ControlConfig_pb2
+
+# Set acceleration limits
+ControlConfig_pb2.JointAccelerationSoftLimits
 
 # Maximum allowed waiting time during actions (in seconds)
 TIMEOUT_DURATION = 20
 
 # Actuator speed (deg/s)
-SPEED = 20.0
+SPEED = 1000.0
+SPEED_six = 100.0
 
 # Create closure to set an event after an END or an ABORT
 def check_for_end_or_abort(e):
@@ -44,6 +50,43 @@ def check_for_end_or_abort(e):
         or notification.action_event == Base_pb2.ACTION_ABORT:
             e.set()
     return check
+
+def example_move_to_home_position(base):
+    # Make sure the arm is in Single Level Servoing mode
+    base_servo_mode = Base_pb2.ServoingModeInformation()
+    base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
+    base.SetServoingMode(base_servo_mode)
+    
+    # Move arm to ready position
+    print("Moving the arm to a safe position")
+    action_type = Base_pb2.RequestedActionType()
+    action_type.action_type = Base_pb2.REACH_JOINT_ANGLES
+    action_list = base.ReadAllActions(action_type)
+    action_handle = None
+    for action in action_list.action_list:
+        if action.name == "Home":
+            action_handle = action.handle
+
+    if action_handle == None:
+        print("Can't reach safe position. Exiting")
+        return False
+
+    e = threading.Event()
+    notification_handle = base.OnNotificationActionTopic(
+        check_for_end_or_abort(e),
+        Base_pb2.NotificationOptions()
+    )
+
+    base.ExecuteActionFromReference(action_handle)
+    finished = e.wait(TIMEOUT_DURATION)
+    base.Unsubscribe(notification_handle)
+
+    if finished:
+        print("Safe position reached")
+    else:
+        print("Timeout on action notification wait")
+    return finished
+
 
 def example_move_to_start_position(base):
     # Make sure the arm is in Single Level Servoing mode
@@ -84,31 +127,36 @@ def example_move_to_start_position(base):
 
 def example_send_joint_speeds(base):
 
+    joint_accelerations = ControlConfig_pb2.JointAccelerationSoftLimits()
+
     joint_speeds = Base_pb2.JointSpeeds()
 
     actuator_count = base.GetActuatorCount().count
     # The 7DOF robot will spin in the same direction for 10 seconds
-    if actuator_count == 7:
-        speeds = [SPEED, 0, -SPEED, 0, SPEED, 0, -SPEED]
-        i = 0
-        for speed in speeds:
-            joint_speed = joint_speeds.joint_speeds.add()
-            joint_speed.joint_identifier = i 
-            joint_speed.value = speed
-            joint_speed.duration = 0
-            i = i + 1
-        print ("Sending the joint speeds for 10 seconds...")
-        base.SendJointSpeedsCommand(joint_speeds)
-        time.sleep(10)
+    # if actuator_count == 7:
+    #     print('reached 1')
+    #     speeds = [0, 0, 0, 0, 0, -SPEED, 0]
+    #     i = 0
+    #     for speed in speeds:
+    #         joint_speed = joint_speeds.joint_speeds.add()
+    #         joint_speed.joint_identifier = i 
+    #         joint_speed.value = speed
+    #         joint_speed.duration = 0
+    #         i = i + 1
+    #     print ("Sending the joint speeds for 10 seconds...")
+    #     base.SendJointSpeedsCommand(joint_speeds)
+    #     time.sleep(4)
     # The 6 DOF robot will alternate between 4 spins, each for 2.5 seconds
-    if actuator_count == 6:
+    if actuator_count == 7:
+        print('reached 2')
         print ("Sending the joint speeds for 10 seconds...")
         for times in range(4):
             del joint_speeds.joint_speeds[:]
-            if times % 2:
-                speeds = [-SPEED, 0.0, 0.0, SPEED, 0.0, 0.0]
+            if times % 2 == 0:
+                # Second one is opposite
+                speeds = [0, 0, 0, SPEED, 0,0, 0]
             else:
-                speeds = [SPEED, 0.0, 0.0, -SPEED, 0.0, 0.0]
+                speeds = [0, 0, 0, -SPEED, 0, 0, 0]
             i = 0
             for speed in speeds:
                 joint_speed = joint_speeds.joint_speeds.add()
@@ -118,7 +166,7 @@ def example_send_joint_speeds(base):
                 i = i + 1
             
             base.SendJointSpeedsCommand(joint_speeds)
-            time.sleep(2.5)
+            time.sleep(2)
 
     print ("Stopping the robot")
     base.Stop()
@@ -133,19 +181,38 @@ def main():
 
     # Parse arguments
     args = utilities.parseConnectionArguments()
+
+    transport = TCPTransport()
+    router = RouterClient(transport)
+    transport.connect("192.168.1.10", 1883)
+
+    # Create required services
+    base = BaseClient(router)
+    acceleration = ControlConfig_pb2(router)
+
+
+
+    # Example core
+    success = True
+    success &= example_send_joint_speeds(base)
+
+
+    return 0 if success else 1
+
     
-    # Create connection to the device and get the router
-    with utilities.DeviceConnection.createTcpConnection(args) as router:
+    # # Create connection to the device and get the router
+    # with utilities.DeviceConnection.createTcpConnection(args) as router:
 
-        # Create required services
-        base = BaseClient(router)
+    #     # Create required services
+    #     base = BaseClient(router)
+        
+    #     # Example core
+    #     success = True
+    #     # success &= example_move_to_start_position(base)
+    #     success &= example_send_joint_speeds(base)
+    #     # success &= example_move_to_start_position(base)
 
-        # Example core
-        success = True
-        success &= example_move_to_start_position(base)
-        success &= example_send_joint_speeds(base)
-
-        return 0 if success else 1
+    #     return 0 if success else 1
 
 if __name__ == "__main__":
     exit(main())
