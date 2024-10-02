@@ -25,7 +25,6 @@ from kortex_api.autogen.messages import Base_pb2, BaseCyclic_pb2, Common_pb2
 
 # Maximum allowed waiting time during actions (in seconds)
 TIMEOUT_DURATION = 30
-GRIPPER_TIMEOUT_DURATION = 2
 
 # Create closure to set an event after an END or an ABORT
 def check_for_end_or_abort(e):
@@ -93,19 +92,18 @@ def populateCartesianCoordinate(waypointInformation):
     return waypoint
 
 def trajectory(base, base_cyclic):
-
     base_servo_mode = Base_pb2.ServoingModeInformation()
     base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
     base.SetServoingMode(base_servo_mode)
     waypointsDefinition = tuple(tuple())
+   
+    waypointsDefinition = ( (0.315,   0.04,  0.422,  0.0, 180.0, 1.0, 93.6),
+                            (0.26,  0.183,  0.422, 1.0, 180.0, 1.0, 127.5),
+                            (0.034,  -0.315, 0.422,  1.0, 180.0, 1.0, 8.9),
+                            (0.264,   -0.175, 0.422, 1.0, 180.0, 1.0, 59.0),
+                            (0.307,   -0.082, 0.422, 1.0, 180.0, 1.0, 77.6),
+                            (0.315,   0.04,  0.422,  0.0, 180.0, 1.0, 93.6))
 
-    waypointsDefinition = ( (0.58,   0.03,  0.42,  0.0, 92.5, 1.5, 94.0),
-                            (0.57,  -0.07,  0.32, 0.1, 108.8, 0.8, 84.6),
-                            (0.5,   -0.24, 0.22, 0.1, 125.4, 0.2, 66.2),
-                            (0.4,  -0.32, 0.15,  0.1, 141.3, 0.0, 52.0),
-                            (0.19,   -0.37, 0.07, 0.1, 161.9, 0.5, 29.0),
-                            (0.1,   -0.35, 0.05, 0.1, 161.9, 0.5, 29.0),
-                            (0.075, -0.34, 0.033, 0.0, 178.5, 1.5, 15))
     
     waypoints = Base_pb2.WaypointList()
     
@@ -127,7 +125,7 @@ def trajectory(base, base_cyclic):
                                                                 Base_pb2.NotificationOptions())
 
         print("Moving cartesian trajectory...")
-        
+            
         base.ExecuteWaypointTrajectory(waypoints)
 
         print("Waiting for trajectory to finish ...")
@@ -135,46 +133,13 @@ def trajectory(base, base_cyclic):
         base.Unsubscribe(notification_handle)
 
         return finished
-        
+    
     else:
         print("Error found in trajectory") 
         result.trajectory_error_report.PrintDebugString()
 
-def gripper_close(base):
-    gripper_command = Base_pb2.GripperCommand()
-    finger = gripper_command.gripper.finger.add()
 
-    e = threading.Event()
-    notification_handle = base.OnNotificationActionTopic(   check_for_end_or_abort(e),
-                                                                Base_pb2.NotificationOptions())
 
-    # Set position to close gripper
-    print ("Closing gripper using position command...")
-    gripper_command.mode = Base_pb2.GRIPPER_POSITION
-    finger.value = 0.57
-    base.SendGripperCommand(gripper_command)
-    
-    finished = e.wait(GRIPPER_TIMEOUT_DURATION)
-    base.Unsubscribe(notification_handle)
-    return finished
-
-def gripper_open(base):
-    gripper_command = Base_pb2.GripperCommand()
-    finger = gripper_command.gripper.finger.add()
-
-    e = threading.Event()
-    notification_handle = base.OnNotificationActionTopic(   check_for_end_or_abort(e),
-                                                                Base_pb2.NotificationOptions())
-
-    # Set position to open gripper
-    print ("Opening gripper using position command...")
-    gripper_command.mode = Base_pb2.GRIPPER_POSITION
-    finger.value = 0.00
-    base.SendGripperCommand(gripper_command)
-    
-    finished = e.wait(GRIPPER_TIMEOUT_DURATION)
-    base.Unsubscribe(notification_handle)
-    return finished
 
 
 def main():
@@ -198,11 +163,10 @@ def main():
         success = True
 
         success &= move_to_home_position(base)
-        success &= trajectory(base, base_cyclic)
-        success &= gripper_close(base)
+        while(True):
+            success &= trajectory(base, base_cyclic)
         success &= move_to_home_position(base)
-        success &= gripper_open(base)
-       
+
         return 0 if success else 1
 
 if __name__ == "__main__":
