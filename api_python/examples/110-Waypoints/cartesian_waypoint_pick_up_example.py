@@ -173,8 +173,8 @@ def gripper_open(base):
     notification_handle = base.OnNotificationActionTopic(   check_for_end_or_abort(e),
                                                                 Base_pb2.NotificationOptions())
 
-    # Set position to close gripper
-    print ("Closing gripper using position command...")
+    # Set position to open gripper
+    print ("Opening gripper using position command...")
     gripper_command.mode = Base_pb2.GRIPPER_POSITION
     finger.value = 0.00
     base.SendGripperCommand(gripper_command)
